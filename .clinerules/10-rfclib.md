@@ -50,6 +50,8 @@ with their line ranges.
 - RFC 6480 (Informational, 2012-02)
 - RFC 9324 (Proposed Standard, 2022-12)
 - RFC 6396 (Proposed Standard, 2011-10)
+- RFC 6811 (Proposed Standard, 2013-01)
+- RFC 8481 (Proposed Standard, 2018-09)
 
 ## Traps that have already bitten this portfolio
 

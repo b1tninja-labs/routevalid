@@ -46,11 +46,13 @@ document, which is the honest grain size for a plan. See [docs/rfc-map.md](docs/
 | RFC 6480 | Informational | 2012-02 | the RPKI architecture whose assertions an origin check consumes |
 | RFC 9324 | Proposed Standard | 2022-12 | why fresh RPKI data must not trigger a route refresh when re-evaluating |
 | RFC 6396 | Proposed Standard | 2011-10 | the archive format for replaying history against a detection rule |
+| RFC 6811 | Proposed Standard | 2013-01 | BGP prefix origin validation: the Valid, Invalid and NotFound states an origin check returns |
+| RFC 8481 | Proposed Standard | 2018-09 | clarifications to origin validation: every prefix gets a state, no policy without operator configuration |
 
 ### Errata watch
 
 - RFC 9234 reports no errata as of 2026-10-29, and deployment is thin enough that you should expect to test against peers who do not send the attribute.
-- RFC 6480 has 1 erratum on file, none verified; RFC 9324 updates RFC 8481 and should be read together with it.
+- RFC 6480 has 1 erratum on file, none verified; RFC 9324 updates RFC 8481 and should be read together with it. RFC 6811 is updated by RFC 8481 and RFC 8893; neither RFC 6811 nor RFC 8481 has a verified erratum (rfclib, 2026-11-07).
 
 ## Module layout
 
@@ -75,7 +77,8 @@ document, which is the honest grain size for a plan. See [docs/rfc-map.md](docs/
 ## Install
 
 ```bash
-git clone https://github.com/b1tninja/routevalid.cd routevalid
+git clone https://github.com/b1tninja/routevalid.git
+cd routevalid
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\\Scripts\\Activate.ps1
 pip install -e ".[dev]"

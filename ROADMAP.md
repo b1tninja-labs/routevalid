@@ -11,20 +11,24 @@ behaviour regressed. Reading the code and agreeing with it is not enough. That i
 Legend: `[ok]` implemented and pinned by a named test -- `[part]` partial, with what is
 missing stated -- `[ ]` not implemented -- `[no]` deliberate non-goal.
 
+A Where cell marked `(to be written)` names the test that will pin the row once it exists; no
+such test has been written yet, and the row cannot leave `[ ]` until it has. The Milestone
+column places the row on the ladder in section 2, and `-` means it is not placed yet.
+
 Update the affected row in the same commit that changes the behaviour. A row and its test
 drift apart within one release, and the document becomes useless exactly when it is needed.
 
 ## 1. Obligations
 
-| Obligation | Spec | Status | Where |
-|---|---|---|---|
-| `observe.record()` | design | `[ ]` | `tests/test_obligations.py::record` |
-| `visibility.announcers()` | design | `[ ]` | `tests/test_obligations.py::announcers` |
-| `origin.check_origin()` | RFC 6480 | `[ ]` | `tests/test_obligations.py::check_origin` |
-| `leak.check_path()` | RFC 9234 | `[ ]` | `tests/test_obligations.py::check_path` |
-| `score.confidence()` | design | `[ ]` | `tests/test_obligations.py::confidence` |
-| `event.emit()` | design | `[ ]` | `tests/test_obligations.py::emit` |
-| `replay.reevaluate()` | RFC 9324 | `[ ]` | `tests/test_obligations.py::reevaluate` |
+| Obligation | Spec | Status | Where | Milestone |
+|---|---|---|---|---|
+| `observe.record()` | design | `[ ]` | `tests/test_obligations.py::test_record` (to be written) | M1 |
+| `visibility.announcers()` | design | `[ ]` | `tests/test_obligations.py::test_announcers` (to be written) | M1 |
+| `origin.check_origin()` | RFC 6480 | `[ ]` | `tests/test_obligations.py::test_check_origin` (to be written) | M2 |
+| `leak.check_path()` | RFC 9234 | `[ ]` | `tests/test_obligations.py::test_check_path` (to be written) | M3 |
+| `score.confidence()` | design | `[ ]` | `tests/test_obligations.py::test_confidence` (to be written) | M4 |
+| `event.emit()` | design | `[ ]` | `tests/test_obligations.py::test_emit` (to be written) | M4 |
+| `replay.reevaluate()` | RFC 9324 | `[ ]` | `tests/test_obligations.py::test_reevaluate` (to be written) | M5 |
 
 ## 2. Milestones
 
@@ -41,7 +45,7 @@ the code existing. Coverage in `pyproject.toml` ratchets in the same commit.
 ## 3. Errata watch
 
 - RFC 9234 reports no errata as of 2026-10-29, and deployment is thin enough that you should expect to test against peers who do not send the attribute.
-- RFC 6480 has 1 erratum on file, none verified; RFC 9324 updates RFC 8481 and should be read together with it.
+- RFC 6480 has 1 erratum on file, none verified; RFC 9324 updates RFC 8481 and should be read together with it. RFC 6811 is updated by RFC 8481 and RFC 8893; neither RFC 6811 nor RFC 8481 has a verified erratum (rfclib, 2026-11-07).
 
 ## 4. Deliberate non-goals
 
