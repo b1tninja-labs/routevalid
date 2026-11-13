@@ -329,10 +329,17 @@ def irr_evidence(
 
 @dataclass(frozen=True, slots=True)
 class OriginVerdict:
-    """The RPKI state and the IRR evidence for one route, side by side and never merged."""
+    """The RPKI state and the IRR evidence for one route, side by side and never merged.
+
+    ``as_set`` is the RFC 9774 finding for the route's AS_PATH, beside them, or ``None`` when no
+    path was given. It never changes ``rov``: if it says ``rov_may_be_valid`` is False and ``rov``
+    says Valid, both are reported and the caller sees the disagreement. No replacement state is
+    invented, because RFC 9774 does not name one (PORTFOLIO.md sec. 9 item 15).
+    """
 
     rov: RovResult
     irr: IrrEvidence
+    as_set: AsSetVerdict | None = None
 
 
 def check_origin(
@@ -341,14 +348,30 @@ def check_origin(
     roas: Iterable[Vrp],
     irr: Iterable[IrrRoute],
     sources: Iterable[str] = (),
+    *,
+    segments: Segments | None = None,
+    configured_to_accept: bool = False,
 ) -> OriginVerdict:
     """Pair the RFC 6811 state (`rov_state`) with the IRR evidence (`irr_evidence`) for one route.
 
     The two answers are independent inputs to a later confidence judgement (``score.confidence``):
     this function neither ranks them nor lets IRR data change the RFC 6811 state, so an RPKI
     ``NotFound`` stays ``NotFound`` however many registries list the route.
+
+    Given the route's AS_PATH as ``segments``, the RFC 9774 finding (`as_set_policy`) is reported
+    beside them in ``OriginVerdict.as_set``. The RFC 6811 state is exactly what `rov_state` said:
+    a route with an AS_SET that RFC 6811 calls Valid stays Valid here, with the finding next to it
+    saying RFC 9774 section 4 never allows that. This function does not pick Invalid or NotFound
+    in its place.
     """
-    return OriginVerdict(rov_state(prefix, asn, roas), irr_evidence(prefix, asn, irr, sources))
+    finding = (
+        None
+        if segments is None
+        else as_set_policy(segments, configured_to_accept=configured_to_accept)
+    )
+    return OriginVerdict(
+        rov_state(prefix, asn, roas), irr_evidence(prefix, asn, irr, sources), finding
+    )
 
 
 # ---- RFC 8893 effective origin and RFC 9774 AS_SET policy ----------------------------------------

@@ -374,3 +374,28 @@ def test_check_origin_irr_cannot_rescue_an_invalid_route() -> None:
     )
     assert verdict.rov.state is V.INVALID
     assert verdict.irr.status_of("RIPE") is IrrStatus.REGISTERED
+
+
+def test_check_origin_reports_the_as_set_finding_beside_the_rfc_6811_state() -> None:
+    # RFC 6811 section 2 only makes the origin NONE for a final AS_SET, so an AS_SET in the middle
+    # still reaches Valid in rov_state. RFC 9774 section 4 says such a route is never Valid.
+    # check_origin reports both and invents no replacement state (PORTFOLIO.md sec. 9 item 15).
+    prefix = net("192.0.2.0/24")
+    roas = [vrp("192.0.2.0/24", 24, 64496)]
+    middle_set = [(2, [64510]), (1, [64511, 64512]), (2, [64496])]
+    verdict = check_origin(prefix, 64496, roas, [], segments=middle_set)
+    assert verdict.rov.state is V.VALID  # the RFC 6811 state, untouched
+    assert verdict.as_set is not None
+    assert verdict.as_set.has_as_set
+    assert not verdict.as_set.rov_may_be_valid
+    assert verdict.as_set.treat_as_withdraw
+    # no path given: no finding; a path with no set: a finding that raises no flag
+    assert check_origin(prefix, 64496, roas, []).as_set is None
+    clean = check_origin(prefix, 64496, roas, [], segments=[(2, [64496])]).as_set
+    assert clean is not None
+    assert clean.rov_may_be_valid
+    assert not clean.treat_as_withdraw
+    # the state is the same with or without the finding
+    assert check_origin(prefix, 64496, roas, [], segments=middle_set).rov == rov_state(
+        prefix, 64496, roas
+    )
