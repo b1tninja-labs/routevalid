@@ -17,7 +17,10 @@ import routevalid as package
 SURFACE = [
     ("observe", "record", "design"),
     ("visibility", "announcers", "design"),
-    ("origin", "check_origin", "RFC 6480"),
+    ("origin", "check_origin", "RFC 6811"),
+    ("origin", "rov_state", "RFC 6811"),
+    ("origin", "route_origin_asn", "RFC 6811"),
+    ("origin", "irr_evidence", "design"),
     ("leak", "check_path", "RFC 9234"),
     ("score", "confidence", "design"),
     ("event", "emit", "design"),

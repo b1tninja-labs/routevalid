@@ -9,7 +9,7 @@ from . import apps, cli, event, leak, observe, origin, replay, rules, score, vis
 from .event import emit
 from .leak import check_path
 from .observe import record
-from .origin import check_origin
+from .origin import check_origin, irr_evidence, route_origin_asn, rov_state
 from .replay import reevaluate
 from .score import confidence
 from .visibility import announcers
@@ -26,12 +26,15 @@ __all__ = [
     "confidence",
     "emit",
     "event",
+    "irr_evidence",
     "leak",
     "observe",
     "origin",
     "record",
     "reevaluate",
     "replay",
+    "route_origin_asn",
+    "rov_state",
     "rules",
     "score",
     "visibility",

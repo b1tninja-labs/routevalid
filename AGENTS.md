@@ -63,6 +63,8 @@ rather than merely incomplete.
 
 ## Read before implementing
 
+- RFC 6811 is implemented here (`origin.rov_state`) on plain data: no dependency on rpkit, whose own function of the same name is an open owner decision (ROADMAP D1). The IRR half is evidence in its own type and must never change the RPKI state.
+- RFC 4271 has 9 verified errata, RFC 5065 one, and both are updated by RFC 9774 (AS_SET deprecation, not yet read in full); read them before the AS_PATH rows close.
 - RFC 9234 reports no errata as of 2026-10-29, and deployment is thin enough that you should expect to test against peers who do not send the attribute.
 - RFC 6480 has 1 erratum on file, none verified; RFC 9324 updates RFC 8481 and should be read together with it. RFC 6811 is updated by RFC 8481 and RFC 8893; neither RFC 6811 nor RFC 8481 has a verified erratum (rfclib, 2026-11-07).
 
