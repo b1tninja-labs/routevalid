@@ -17,9 +17,10 @@ they are weighed; nothing here decides which one wins.
 Scope of what was read, so a citation is not mistaken for more: RFC 6811 section 2 and 2.1 in full
 (no errata, rfclib 2026-11-13), RFC 8481 section 4 (every route is evaluated, and a redistributed
 route with no AS_PATH uses the router's own AS), RFC 5065 section 3 and RFC 4271 section 4.3 for the
-segment type codes, RFC 2622 section 4. RFC 8893 (the *effective origin* for export-side
-validation) and RFC 9774 (AS_SET deprecation; it updates RFC 4271 and RFC 5065) are listed in
-ROADMAP.md as rows and are not implemented here. RFC 4012 adds the ``route6`` class for IPv6; it was
+segment type codes, RFC 2622 section 4. RFC 8893 sections 1, 3 and 4 (the *effective origin* for
+export-side validation; `effective_origin`), RFC 9774 sections 3 and 4 (AS_SET and AS_CONFED_SET;
+`as_set_policy`), RFC 4271 section 5.1.2, RFC 5065 section 4.1 and RFC 6996 sections 3 to 5 were
+read for the second pass; none has an erratum on the sections used. RFC 4012 adds the ``route6`` class for IPv6; it was
 not read, and `irr_evidence` treats an IPv6 route object with the same key shape.
 """
 
@@ -32,16 +33,21 @@ from dataclasses import dataclass
 
 __all__ = [
     "MAX_ASN",
+    "AsSetVerdict",
     "IrrEvidence",
     "IrrRoute",
     "IrrSourceEvidence",
     "IrrStatus",
     "OriginVerdict",
+    "PrivateRemoval",
     "RovResult",
     "RovState",
     "SegmentType",
     "Vrp",
+    "as_set_policy",
     "check_origin",
+    "effective_origin",
+    "effective_path",
     "irr_evidence",
     "route_origin_asn",
     "rov_state",
@@ -343,3 +349,153 @@ def check_origin(
     ``NotFound`` stays ``NotFound`` however many registries list the route.
     """
     return OriginVerdict(rov_state(prefix, asn, roas), irr_evidence(prefix, asn, irr, sources))
+
+
+# ---- RFC 8893 effective origin and RFC 9774 AS_SET policy ----------------------------------------
+
+#: RFC 6996 section 5: Private Use ASNs, 64512-65534 and 4200000000-4294967294 inclusive.
+PRIVATE_RANGES: tuple[tuple[int, int], ...] = ((64512, 65534), (4200000000, 4294967294))
+
+
+def is_private_asn(asn: int) -> bool:
+    """True for a Private Use ASN (RFC 6996 section 5). 65535 and 4294967295 are the RFC 7300 last
+    ASNs, reserved but not Private Use, so they are not private here."""
+    return any(low <= asn <= high for low, high in PRIVATE_RANGES)
+
+
+class PrivateRemoval(enum.Enum):
+    """How an egress policy removes Private Use ASNs. RFC 8893 names the knob and fixes no
+    algorithm, and RFC 6996 section 4 notes that implementations differ on mixed paths."""
+
+    NONE = "none"
+    ALL = "all"  # every Private Use ASN is dropped, wherever it sits
+    ONLY_IF_ALL_PRIVATE = "only-if-all-private"  # a mixed path is left untouched
+
+
+Segments = Sequence[tuple[int, Sequence[int]]]
+
+
+def effective_path(
+    segments: Segments,
+    local_asn: int,
+    *,
+    remove_private: PrivateRemoval = PrivateRemoval.NONE,
+    strip_confed: bool = True,
+    prepend: int = 1,
+) -> tuple[tuple[int, tuple[int, ...]], ...]:
+    """The AS_PATH as it would be sent to an external peer, so the origin can be read from it.
+
+    Order of the steps (RFC 8893 section 3 says validation state MUST be determined "using the
+    effective origin AS of the route as it will (or would) be announced to the peer", and leaves the
+    steps to the implementation, so this order is this library's choice):
+
+    1. ``strip_confed``: remove AS_CONFED_SEQUENCE and AS_CONFED_SET segments (RFC 5065 section 4.1
+       (c)(1), which applies when the peer is outside the confederation; pass False to model an
+       advertisement to a member AS or an internal peer, where nothing is stripped).
+    2. ``remove_private``: drop Private Use ASNs (RFC 6996 section 5 ranges); a segment left
+       empty is removed.
+    3. ``prepend``: put ``local_asn`` that many times at the front (RFC 4271 section 5.1.2 (b):
+       onto a leading AS_SEQUENCE, or as a new AS_SEQUENCE when the path is empty or leads with an
+       AS_SET; the same text allows more than one copy by local configuration). 0 models an
+       advertisement that is not prepended, such as an internal peer.
+
+    Segment types are ints; a member list is not validated beyond the ASN range. The local ASN is
+    never removed by step 2 (it is added after), which is the usual router order but not mandated.
+    """
+    _check_asn(local_asn, "local_asn")
+    if isinstance(prepend, bool) or not isinstance(prepend, int) or prepend < 0:
+        raise ValueError("prepend must be a non-negative integer")
+    out: list[tuple[int, tuple[int, ...]]] = []
+    for kind, members in segments:
+        for asn in members:
+            _check_asn(asn, "AS_PATH member")
+        if strip_confed and kind in (SegmentType.AS_CONFED_SEQUENCE, SegmentType.AS_CONFED_SET):
+            continue
+        out.append((int(kind), tuple(members)))
+    everything = [asn for _, members in out for asn in members]
+    if remove_private is PrivateRemoval.ALL or (
+        remove_private is PrivateRemoval.ONLY_IF_ALL_PRIVATE
+        and everything
+        and all(is_private_asn(a) for a in everything)
+    ):
+        out = [(k, kept) for k, m in out if (kept := tuple(a for a in m if not is_private_asn(a)))]
+    if prepend:
+        mine = (local_asn,) * prepend
+        if out and out[0][0] == SegmentType.AS_SEQUENCE:
+            out[0] = (out[0][0], mine + out[0][1])
+        else:
+            out.insert(0, (int(SegmentType.AS_SEQUENCE), mine))
+    return tuple(out)
+
+
+def effective_origin(
+    segments: Segments,
+    local_asn: int,
+    *,
+    remove_private: PrivateRemoval = PrivateRemoval.NONE,
+    strip_confed: bool = True,
+    prepend: int = 1,
+) -> int | None:
+    """The effective origin AS of RFC 8893: the RFC 6811 Route Origin ASN of the UPDATE to be sent.
+
+    RFC 8893 section 1 defines it as "the Route Origin ASN [RFC6811] of the UPDATE to be sent to
+    neighboring BGP speakers" and section 3 requires egress validation to use it. This is
+    `route_origin_asn` applied to `effective_path`; read that function for the knobs. ``None`` is
+    RFC 6811's "NONE" (for example the final segment is an AS_SET). Feed the result to `rov_state`.
+    """
+    path = effective_path(
+        segments,
+        local_asn,
+        remove_private=remove_private,
+        strip_confed=strip_confed,
+        prepend=prepend,
+    )
+    return route_origin_asn(path, local_asn)
+
+
+@dataclass(frozen=True, slots=True)
+class AsSetVerdict:
+    """What RFC 9774 says about a path that carries set segments.
+
+    ``has_as_set`` and ``has_confed_set`` say which set types appear anywhere in the path.
+    ``treat_as_withdraw`` is RFC 9774 section 3's receive rule (RFC 7606), unless the operator
+    configured otherwise. ``rov_may_be_valid`` is False when an AS_SET appears: section 4 says ROV
+    "never allows a route with AS_SET to be considered Valid". ``aspa_invalid`` is section 4's
+    "a route with AS_SET is always considered Invalid" for ASPA.
+    """
+
+    has_as_set: bool
+    has_confed_set: bool
+    treat_as_withdraw: bool
+    rov_may_be_valid: bool
+    aspa_invalid: bool
+
+
+def as_set_policy(segments: Segments, *, configured_to_accept: bool = False) -> AsSetVerdict:
+    """The RFC 9774 sections 3 and 4 consequences of AS_SET and AS_CONFED_SET in an AS_PATH.
+
+    Section 3: unless explicitly configured otherwise (``configured_to_accept``, "e.g., during a
+    transition phase"), a speaker MUST use treat-as-withdraw (RFC 7606) on receiving an AS_SET or
+    AS_CONFED_SET. Section 4 is about AS_SET only: ROV never yields Valid and ASPA yields Invalid.
+    AS_CONFED_SET is treated by this function as a set for the section 3 receive rule only, because
+    section 4 does not name it; a path with a confederation segment should not reach a validator
+    (confederation segments do not cross the confederation edge, RFC 5065 section 4.1).
+    The section 4 flags hold even when ``configured_to_accept`` is set: acceptance does not make
+    such a route Valid. RFC 9774 does not say which RFC 6811 state to report in place of Valid
+    (Invalid or NotFound), so none is chosen here.
+    """
+    for kind, members in segments:
+        for asn in members:
+            _check_asn(asn, "AS_PATH member")
+        if isinstance(kind, bool) or not isinstance(kind, int):
+            raise TypeError("segment type must be an int")
+    kinds = {int(kind) for kind, _ in segments}
+    has_set = int(SegmentType.AS_SET) in kinds
+    has_cset = int(SegmentType.AS_CONFED_SET) in kinds
+    return AsSetVerdict(
+        has_as_set=has_set,
+        has_confed_set=has_cset,
+        treat_as_withdraw=(has_set or has_cset) and not configured_to_accept,
+        rov_may_be_valid=not has_set,
+        aspa_invalid=has_set,
+    )
