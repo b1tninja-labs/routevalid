@@ -48,6 +48,7 @@ dev = [
 ]
 feeds = ["bmpkit>0.1", "bgpfeed>0.1"]
 rpki = ["rpkit>0.1", "rtrkit>0.1"]
+paths = ["pathattr>0.1"]
 
 [project.urls]
 Homepage = "https://github.com/b1tninja/routevalid"
@@ -70,7 +71,7 @@ include = ["/routevalid/", "/tests/", "/docs/", "/README.md", "/ROADMAP.md", "/C
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "../pathattr", "../rtrkit"]
 asyncio_mode = "auto"
 addopts = "-ra"
 
@@ -118,3 +119,5 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
 ignore_missing_imports = true
+# pathattr and rtrkit are unpublished siblings; the paths come out when they publish.
+mypy_path = "../pathattr:../rtrkit"

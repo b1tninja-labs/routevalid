@@ -22,6 +22,11 @@ The format follows Keep a Changelog, and this project adheres to Semantic Versio
 - `routevalid.aspa`: ASPA AS_PATH verification pinned to draft-ietf-sidrops-aspa-verification-29
   (provider authorization, ramp bounds, upstream and downstream algorithms), checked against an
   independent enumeration oracle.
+- `aspa.feed` (the U-SPAS table from pairs, a mapping or rtrkit's `PayloadDb`), `aspa.verify_update`
+  and `aspa.segments_from_path` (verification of pathattr's reconstructed AS_PATH) and
+  `aspa.direction_from_role` (upstream or downstream from the RFC 9234 Role, with the Complex
+  relationship fallback). pathattr and rtrkit are sibling checkouts for the tests, listed in
+  pyproject as the `paths` extra and the pytest and mypy paths.
 
 ### Changed
 

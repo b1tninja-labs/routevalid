@@ -14,7 +14,9 @@ Scope kept to the draft: the procedures apply to AFI 1 or 2 with SAFI 1 only (se
 `applicable`), on four-octet-AS speakers using the reconstructed AS_PATH (section 5, RFC 6793
 section 4.2.3: the caller reconstructs it), on eBGP sessions at the edge. Choosing the algorithm
 (upstream or downstream) from the peering relationship (RFC 9234 roles, section 6.3) and handling
-Complex relationships (section 6.4) is the caller's decision and is passed in as `Direction`.
+Complex relationships (section 6.4) is `direction_from_role`'s job, and `verify` itself takes the
+`Direction`. The U-SPAS table comes from `feed`; the reconstructed AS_PATH comes from pathattr's
+`Attributes.effective_as_path`, read by `verify_update` without importing pathattr.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 __all__ = [
     "DRAFT",
@@ -29,11 +32,16 @@ __all__ = [
     "AspaState",
     "Authorization",
     "Direction",
+    "VerificationPlan",
     "applicable",
     "authorized",
     "compress_path",
+    "direction_from_role",
+    "feed",
+    "segments_from_path",
     "union_spas",
     "verify",
+    "verify_update",
 ]
 
 DRAFT = "draft-ietf-sidrops-aspa-verification-29"
@@ -235,3 +243,117 @@ def verify(
     if min_up + min_down < n:
         return halt(AspaState.UNKNOWN, "min_up_ramp + min_down_ramp < N", *bounds)
     return halt(AspaState.VALID, "ramps cover the path", *bounds)
+
+
+# ---- inputs: the U-SPAS feed, the reconstructed path, and the choice of algorithm ----------------
+
+
+def feed(source: Any) -> dict[int, frozenset[int]]:
+    """Build the U-SPAS table (section 5.3) from validated ASPA data held as plain data.
+
+    ``source`` is any of: an iterable of (customer, providers) pairs, one per valid ASPA object,
+    which may repeat a customer (the pairs are unioned by `union_spas`); a mapping from customer
+    to providers; or an object with an ``aspas`` mapping, which is what rtrkit's ``PayloadDb``
+    holds after ASPA PDUs are applied (draft-ietf-sidrops-8210bis-29 section 5.12: at most one
+    ASPA PDU is active per customer from one cache, and the cache has formed the union already).
+    A customer with no providers is refused, as in `union_spas`. rpkit has no ASPA object model
+    yet, so its output reaches this function as pairs.
+    """
+    if hasattr(source, "aspas"):
+        source = source.aspas
+    if isinstance(source, Mapping):
+        source = source.items()
+    return union_spas(source)
+
+
+class _Segment(Protocol):
+    @property
+    def type(self) -> int: ...
+    @property
+    def asns(self) -> Sequence[int]: ...
+
+
+def segments_from_path(path: Iterable[_Segment]) -> list[tuple[int, tuple[int, ...]]]:
+    """Segments in the shape `verify` takes, from pathattr's ``Segment`` objects.
+
+    Any object with ``type`` (the RFC 4271 section 4.3 or RFC 5065 section 3 code) and ``asns``
+    works, so this module does not import pathattr.
+    """
+    return [(int(segment.type), tuple(segment.asns)) for segment in path]
+
+
+class _HasPath(Protocol):
+    @property
+    def effective_as_path(self) -> Iterable[_Segment] | None: ...
+
+
+def verify_update(
+    attributes: _HasPath,
+    spas: Spas,
+    neighbor_asn: int,
+    direction: Direction,
+    *,
+    rs_client: bool = False,
+) -> AspaResult:
+    """Verify the AS_PATH of decoded path attributes (section 5: the reconstructed AS_PATH).
+
+    ``attributes`` is pathattr's ``Attributes``: its ``effective_as_path`` is AS_PATH rebuilt
+    with AS4_PATH by RFC 6793 section 4.2.3 when the session is two-octet, and plain AS_PATH
+    between four-octet speakers. A route with no AS_PATH reads as an empty path, which is Invalid
+    (section 5.5 step 1 and section 5.6 step 1). An AS_TRANS left in the path because no AS4_PATH
+    came with it is looked up like any ASN; the draft does not discuss that case.
+    """
+    path = attributes.effective_as_path
+    return verify(
+        segments_from_path(path if path is not None else ()),
+        spas,
+        neighbor_asn,
+        direction,
+        rs_client=rs_client,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationPlan:
+    """Which algorithm to run and whether the upstream neighbour check is skipped."""
+
+    direction: Direction
+    rs_client: bool
+    basis: str
+
+
+# RFC 9234 Table 1 values, the Role the *neighbour* holds toward us (its capability value).
+_PROVIDER, _RS, _RS_CLIENT, _CUSTOMER, _PEER = 0, 1, 2, 3, 4
+
+
+def direction_from_role(
+    remote_role: int | None, *, complex_relationship: bool = False
+) -> VerificationPlan:
+    """Choose the algorithm from the neighbour's RFC 9234 Role (sections 5.5, 5.6, 6.3 and 6.4).
+
+    ``remote_role`` is the BGP Role value the neighbour advertised, which is what it is to us:
+    Customer (3), Peer (4) and RS-Client (2, we are the RS) take the upstream algorithm
+    (section 5.5: "received from a Customer or Peer, or ... by an RS from an RS-client"); RS (1,
+    we are the RS-client) takes it too and skips the neighbour-AS check (section 5.5 step 2:
+    "If the receiving AS is not an RS-client"); Provider (0) takes the downstream one (section
+    5.6). Any int works, so pathattr's ``Role`` need not be imported.
+
+    A Complex relationship that cannot be split into normal sessions may apply the downstream
+    algorithm "to avoid false positive outcomes" (section 6.4, MAY): ``complex_relationship``
+    selects it whatever the role. With no role and no such flag nothing is chosen: the draft
+    recommends BGP Roles (section 6.3) but does not say what to do without one, so this raises
+    ``ValueError`` rather than guess. An unassigned role value raises it too.
+    """
+    if complex_relationship:
+        return VerificationPlan(Direction.DOWNSTREAM, False, "complex relationship (section 6.4)")
+    if remote_role is None:
+        raise ValueError("no BGP Role for the neighbour: the draft does not choose a direction")
+    if remote_role == _PROVIDER:
+        return VerificationPlan(Direction.DOWNSTREAM, False, "route from a Provider (section 5.6)")
+    if remote_role == _RS:
+        return VerificationPlan(
+            Direction.UPSTREAM, True, "received by an RS-client from an RS (section 5.5)"
+        )
+    if remote_role in (_CUSTOMER, _PEER, _RS_CLIENT):
+        return VerificationPlan(Direction.UPSTREAM, False, "customer, peer or RS-client (5.5)")
+    raise ValueError(f"BGP Role value {remote_role} is unassigned (RFC 9234 Table 1)")
