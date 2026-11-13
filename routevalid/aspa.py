@@ -38,6 +38,7 @@ __all__ = [
     "compress_path",
     "direction_from_role",
     "feed",
+    "plan_from_open",
     "segments_from_path",
     "union_spas",
     "verify",
@@ -357,3 +358,35 @@ def direction_from_role(
     if remote_role in (_CUSTOMER, _PEER, _RS_CLIENT):
         return VerificationPlan(Direction.UPSTREAM, False, "customer, peer or RS-client (5.5)")
     raise ValueError(f"BGP Role value {remote_role} is unassigned (RFC 9234 Table 1)")
+
+
+def plan_from_open(
+    remote_open: Any,
+    local_role: int | None = None,
+    *,
+    strict: bool = False,
+    complex_relationship: bool = False,
+) -> VerificationPlan:
+    """Choose the algorithm from the neighbour's OPEN, after RFC 9234 section 4.2's own check.
+
+    ``remote_open`` is pathattr's ``Open``. Its BGP Role capability comes from pathattr's
+    ``roles.role_from_open`` (identical repeats are one, differing repeats raise ``BgpError`` with
+    Role Mismatch), the pair is checked with ``roles.check_roles`` against ``local_role`` (the
+    Role this speaker is configured with, None when it has none, in which case nothing is
+    checked) and ``strict``, and the answer goes to :func:`direction_from_role`. A mismatch raises
+    pathattr's ``BgpError`` (OPEN Message Error, Role Mismatch): the session is not established
+    and there is nothing to verify. A neighbour that sent no Role capability gives
+    ``direction_from_role(None, ...)``, which raises ``ValueError`` unless ``complex_relationship``.
+
+    Needs pathattr (extra ``paths``); it is imported here so the rest of this module does not.
+    """
+    try:
+        from pathattr import roles
+    except ImportError as exc:  # pragma: no cover - depends on the environment
+        raise ImportError("plan_from_open needs pathattr: install routevalid[paths]") from exc
+    remote = roles.role_from_open(remote_open)
+    local = None if local_role is None else roles.Role(local_role)
+    roles.check_roles(local, remote, strict=strict)
+    return direction_from_role(
+        None if remote is None else int(remote), complex_relationship=complex_relationship
+    )
